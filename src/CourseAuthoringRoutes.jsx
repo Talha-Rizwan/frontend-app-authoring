@@ -10,6 +10,7 @@ import { PagesAndResources } from './pages-and-resources';
 import EditorContainer from './editors/EditorContainer';
 import VideoSelectorContainer from './selectors/VideoSelectorContainer';
 import CustomPages from './custom-pages';
+import CustomTemplates from './custom-pages/templates';
 import { FilesPage, VideosPage } from './files-and-videos';
 import { AdvancedSettings } from './advanced-settings';
 import { CourseOutline } from './course-outline';
@@ -81,6 +82,10 @@ const CourseAuthoringRoutes = () => {
         <Route
           path="custom-pages/*"
           element={<PageWrap><CustomPages courseId={courseId} /></PageWrap>}
+        />
+        <Route
+          path="templates"
+          element={<PageWrap><CustomTemplates courseId={courseId} organization="edX" /></PageWrap>}
         />
         {DECODED_ROUTES.COURSE_UNIT.map((path) => (
           <Route

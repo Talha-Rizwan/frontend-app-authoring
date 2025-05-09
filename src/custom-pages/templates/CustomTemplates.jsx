@@ -16,16 +16,29 @@ const CustomTemplates = ({ courseId, organization }) => {
 
   const fetchTemplates = async () => {
     try {
-      const response = await fetch('https://raw.githubusercontent.com/awais786/courses/refs/heads/main/edly_courses.json');
+      const response = await fetch(`${getConfig().STUDIO_BASE_URL}/api/contentstore/v0/course-import-templates/`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getConfig().CSRF_TOKEN,
+        },
+        credentials: 'include',
+      });
       
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
       
       const data = await response.json();
-      const templatesWithIds = data.map((template, index) => ({
-        id: (index + 1).toString(),
-        ...template,
+      const templatesWithIds = data.results.map((template) => ({
+        id: template.id.toString(),
+        courses_name: template.name,
+        zip_url: template.course_template,
+        metadata: {
+          title: template.name,
+          description: template.description,
+          thumbnail: template.thumbnail,
+        },
       }));
       
       setTemplates(templatesWithIds);
@@ -43,26 +56,17 @@ const CustomTemplates = ({ courseId, organization }) => {
 
   const handleImportCourse = async (templateId, importUrl) => {
     try {
-      const apiUrl = `${getConfig().LMS_BASE_URL}/api/course_import_api/import/${templateId}/`;
+      // Create a temporary anchor element
+      const link = document.createElement('a');
+      link.href = importUrl;
+      link.download = `template-${templateId}.zip`; // Set the download filename
       
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getConfig().CSRF_TOKEN,
-        },
-        body: JSON.stringify({ file_url: importUrl }),
-        credentials: 'include',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      
-      await response.json();
-      window.location.href = `/course/${templateId}`;
+      // Append to body, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (error) {
-      console.error('Error importing course:', error);
+      console.error('Error downloading template:', error);
       alert(intl.formatMessage(messages.importError));
     }
   };

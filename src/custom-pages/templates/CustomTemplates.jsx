@@ -3,9 +3,13 @@ import { FormattedMessage, useIntl } from '@edx/frontend-platform/i18n';
 import { Helmet } from 'react-helmet';
 import PropTypes from 'prop-types';
 import { getConfig } from '@edx/frontend-platform';
+import { Button, Alert } from '@openedx/paragon';
+import { getAuthenticatedHttpClient } from '@edx/frontend-platform/auth';
 
 import messages from './messages';
 import TemplateCard from './TemplateCard';
+import TemplateForm from './TemplateForm';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import './CustomTemplates.scss';
 
 const CustomTemplates = ({ courseId, organization }) => {
@@ -13,9 +17,29 @@ const CustomTemplates = ({ courseId, organization }) => {
   const [templates, setTemplates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [notification, setNotification] = useState({ message: '', variant: '' });
+  
+  // Form modal states
+  const [showFormModal, setShowFormModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentTemplate, setCurrentTemplate] = useState(null);
+  
+  // Delete confirmation modal states
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [templateToDelete, setTemplateToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const showNotification = (message, variant) => {
+    setNotification({ message, variant });
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      setNotification({ message: '', variant: '' });
+    }, 5000);
+  };
 
   const fetchTemplates = async () => {
     try {
+      setIsLoading(true);
       const response = await fetch(`${getConfig().STUDIO_BASE_URL}/api/contentstore/v0/course-import-templates/`, {
         method: 'GET',
         headers: {
@@ -42,6 +66,7 @@ const CustomTemplates = ({ courseId, organization }) => {
       }));
       
       setTemplates(templatesWithIds);
+      setError(null);
     } catch (err) {
       console.error('Error fetching templates:', err);
       setError(err.message);
@@ -67,7 +92,98 @@ const CustomTemplates = ({ courseId, organization }) => {
       document.body.removeChild(link);
     } catch (error) {
       console.error('Error downloading template:', error);
-      alert(intl.formatMessage(messages.importError));
+      showNotification(intl.formatMessage(messages.importError), 'danger');
+    }
+  };
+
+  const handleCreateTemplate = () => {
+    setIsEditing(false);
+    setCurrentTemplate(null);
+    setShowFormModal(true);
+  };
+
+  const handleEditTemplate = (template) => {
+    setIsEditing(true);
+    setCurrentTemplate(template);
+    setShowFormModal(true);
+  };
+
+  const handleDeleteTemplate = (templateId) => {
+    const template = templates.find((t) => t.id === templateId);
+    if (template) {
+      setTemplateToDelete(template);
+      setShowDeleteModal(true);
+    }
+  };
+
+  const handleFormSubmit = async (formData, templateId) => {
+    try {
+      let url = `${getConfig().STUDIO_BASE_URL}/api/contentstore/v0/course-import-templates/`;
+      let method = 'post';
+      
+      if (isEditing && templateId) {
+        url = `${url}${templateId}/`;
+        method = 'put';
+      }
+      
+      // Get the course_template URL from the form data
+      const courseTemplateUrl = formData.get('course_template');
+      formData.delete('course_template');
+      formData.append('course_template', courseTemplateUrl);
+      
+      // Use getAuthenticatedHttpClient for CSRF/auth handling
+      const client = getAuthenticatedHttpClient();
+      const response = await client[method](url, formData);
+      
+      if (response.status < 200 || response.status >= 300) {
+        const errorData = response.data;
+        throw new Error(errorData?.error || `HTTP error! Status: ${response.status}`);
+      }
+      
+      // Refresh the templates list
+      await fetchTemplates();
+      
+      // Show success message
+      const message = isEditing
+        ? intl.formatMessage(messages.updateSuccess)
+        : intl.formatMessage(messages.createSuccess);
+      
+      showNotification(message, 'success');
+    } catch (err) {
+      console.error('Error submitting template:', err);
+      const message = isEditing
+        ? intl.formatMessage(messages.updateError)
+        : intl.formatMessage(messages.createError);
+      
+      showNotification(message, 'danger');
+      throw err; // Re-throw to be handled by the form component
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!templateToDelete) return;
+    
+    try {
+      setIsDeleting(true);
+      const client = getAuthenticatedHttpClient();
+      const response = await client.delete(
+        `${getConfig().STUDIO_BASE_URL}/api/contentstore/v0/course-import-templates/${templateToDelete.id}/`
+      );
+      
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
+      // Remove the template from the list
+      setTemplates((prevTemplates) => prevTemplates.filter((t) => t.id !== templateToDelete.id));
+      showNotification(intl.formatMessage(messages.deleteSuccess), 'success');
+    } catch (err) {
+      console.error('Error deleting template:', err);
+      showNotification(intl.formatMessage(messages.deleteError), 'danger');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
+      setTemplateToDelete(null);
     }
   };
 
@@ -112,6 +228,21 @@ const CustomTemplates = ({ courseId, organization }) => {
       </div>
 
       <div className="container">
+        {notification.message && (
+          <Alert variant={notification.variant} className="mb-3" dismissible>
+            {notification.message}
+          </Alert>
+        )}
+        
+        <div className="d-flex justify-content-end mb-3">
+          <Button
+            variant="primary"
+            onClick={handleCreateTemplate}
+          >
+            <FormattedMessage {...messages.createButton} />
+          </Button>
+        </div>
+        
         <div className="courses-container">
           {templates.length === 0 ? (
             <div className="templates-empty">
@@ -126,12 +257,32 @@ const CustomTemplates = ({ courseId, organization }) => {
               <TemplateCard 
                 key={template.id} 
                 template={template} 
-                onImport={handleImportCourse} 
+                onImport={handleImportCourse}
+                onEdit={handleEditTemplate}
+                onDelete={handleDeleteTemplate}
               />
             ))
           )}
         </div>
       </div>
+      
+      {/* Template Form Modal */}
+      <TemplateForm
+        isOpen={showFormModal}
+        onClose={() => setShowFormModal(false)}
+        onSubmit={handleFormSubmit}
+        isEditing={isEditing}
+        initialData={currentTemplate}
+      />
+      
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleConfirmDelete}
+        templateName={templateToDelete?.courses_name || ''}
+        isDeleting={isDeleting}
+      />
     </>
   );
 };

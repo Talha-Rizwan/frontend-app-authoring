@@ -81,17 +81,44 @@ const CustomTemplates = ({ courseId, organization }) => {
 
   const handleImportCourse = async (templateId, importUrl) => {
     try {
-      // Create a temporary anchor element
-      const link = document.createElement('a');
-      link.href = importUrl;
-      link.download = `template-${templateId}.zip`; // Set the download filename
+      // Check if URL is from GitHub raw
+      const isGithubRaw = importUrl.includes('raw.githubusercontent.com');
       
-      // Append to body, click, and remove
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (isGithubRaw) {
+        sessionStorage.setItem('courseImportUrl', importUrl);
+        sessionStorage.setItem('courseImportTemplateId', templateId);
+        
+        window.location.href = `${getConfig().STUDIO_BASE_URL}/import/${courseId}`;
+        return;
+      }
+      
+      // For other URLs, try the fetch approach
+      const response = await fetch(importUrl, { 
+        credentials: 'include',
+        mode: 'cors'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      
+      const filename = importUrl.split('/').pop();
+      const fileName = `template-${templateId}.tar.gz`;
+      const file = new File([blob], fileName, { type: 'application/gzip' });
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        sessionStorage.setItem('courseImportFile', reader.result);
+        sessionStorage.setItem('courseImportFileName', file.name);
+        
+        // Redirect to the import page
+        window.location.href = `${getConfig().STUDIO_BASE_URL}/import/${courseId}`;
+      };
+      reader.readAsDataURL(file);
     } catch (error) {
-      console.error('Error downloading template:', error);
+      console.error('Error preparing course for import:', error);
       showNotification(intl.formatMessage(messages.importError), 'danger');
     }
   };

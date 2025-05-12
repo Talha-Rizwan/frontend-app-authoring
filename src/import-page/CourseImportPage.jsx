@@ -23,6 +23,7 @@ import { LAST_IMPORT_COOKIE_NAME } from './data/constants';
 import ImportSidebar from './import-sidebar/ImportSidebar';
 import FileSection from './file-section/FileSection';
 import messages from './messages';
+import { handleProcessUpload } from './data/thunks';
 
 const CourseImportPage = ({ intl, courseId }) => {
   const dispatch = useDispatch();
@@ -34,6 +35,8 @@ const CourseImportPage = ({ intl, courseId }) => {
   const anyRequestFailed = savingStatus === RequestStatus.FAILED || loadingStatus === RequestStatus.FAILED;
   const isLoadingDenied = loadingStatus === RequestStatus.DENIED;
   const anyRequestInProgress = savingStatus === RequestStatus.PENDING || loadingStatus === RequestStatus.IN_PROGRESS;
+  const courseImportUrl = sessionStorage.getItem('courseImportUrl');
+  const templateId = sessionStorage.getItem('courseImportTemplateId');
 
   useEffect(() => {
     const cookieData = cookies.get(LAST_IMPORT_COOKIE_NAME);
@@ -43,7 +46,81 @@ const CourseImportPage = ({ intl, courseId }) => {
       dispatch(updateFileName(cookieData.fileName));
       dispatch(updateSuccessDate(cookieData.date));
     }
-  }, []);
+
+    if (courseImportUrl && templateId) {
+      const filename = courseImportUrl.split('/').pop();
+      const decodedFilename = decodeURIComponent(filename);
+      const fileName = `template-${templateId}.tar.gz`;
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', courseImportUrl, true);
+      xhr.responseType = 'blob';
+
+      xhr.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          console.log(`Download progress: ${percentComplete}%`);
+        }
+      };
+
+      xhr.onload = function() {
+        if (this.status >= 200 && this.status < 300) {
+          const file = new File([xhr.response], fileName, { type: 'application/gzip' });
+          const formData = new FormData();
+          formData.append('file', file);
+
+          // Trigger the import process
+          dispatch(handleProcessUpload(
+            courseId,
+            formData,
+            {},
+            (error) => { console.error('Error during import:', error); }
+          ));
+        } else {
+          console.error('Error downloading file:', this.status, this.statusText);
+        }
+
+        sessionStorage.removeItem('courseImportUrl');
+        sessionStorage.removeItem('courseImportTemplateId');
+      };
+
+      xhr.onerror = function() {
+        console.error('XHR Request failed');
+        sessionStorage.removeItem('courseImportUrl');
+        sessionStorage.removeItem('courseImportTemplateId');
+      };
+
+      // Start the download
+      xhr.send();
+    }
+
+    const fileDataUrl = sessionStorage.getItem('courseImportFile');
+    const fileName = sessionStorage.getItem('courseImportFileName');
+
+    if (fileDataUrl && fileName) {
+      fetch(fileDataUrl)
+        .then(res => res.blob())
+        .then(blob => {
+          const file = new File([blob], fileName, { type: 'application/gzip' });
+          const formData = new FormData();
+          formData.append('file', file);
+
+          dispatch(handleProcessUpload(
+            courseId,
+            formData,
+            {},
+            (error) => { console.error('Error during import:', error); }
+          ));
+          
+          // Clean up
+          sessionStorage.removeItem('courseImportFile');
+          sessionStorage.removeItem('courseImportFileName');
+        })
+        .catch(error => {
+          console.error('Error processing import file:', error);
+        });
+    }
+  }, [courseId, dispatch]);
 
   if (isLoadingDenied) {
     return (
